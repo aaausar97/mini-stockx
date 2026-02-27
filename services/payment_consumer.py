@@ -44,7 +44,7 @@ def run():
         response = sqs.receive_message(
             QueueUrl=QUEUE_URL,
             MaxNumberOfMessages=10,
-            WaitTimeSeconds=20,       # long polling — efficient, not hammering AWS
+            WaitTimeSeconds=25,       # long polling — efficient, not hammering AWS
         )
 
         messages = response.get("Messages", [])
@@ -56,6 +56,7 @@ def run():
                 # SNS envelope has a "Message" key with our actual payload
                 order = json.loads(body.get("Message", msg["Body"]))
 
+                # shopify/stripe integration here
                 process_order(order)
 
                 # Delete from queue — tells SQS we processed it successfully

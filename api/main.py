@@ -68,6 +68,10 @@ class AskRequest(BaseModel):
     user_id: str    = Field(..., example="seller_001")
     price: float    = Field(..., gt=0, example=210.00)
 
+class InstantOrderRequest(BaseModel):
+    product_id: str = Field(..., example="jordan-1-chicago-10")
+    user_id: str    = Field(..., example="buyer_001")
+
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -116,6 +120,44 @@ def place_ask(req: AskRequest):
         "message": "Ask accepted",
         "event_id": event.event_id,
         "status": "pending_match"
+    }
+
+
+@app.post("/buy-now", status_code=202)
+def buy_now(req: InstantOrderRequest):
+    """
+    Buy Now — instantly purchase at the current lowest ask price.
+    The matcher will pop the best ask from the order book and execute.
+    If no asks exist, the matcher drops the event (no match possible).
+    """
+    event = MarketEvent.new_buy_now(
+        product_id=req.product_id,
+        user_id=req.user_id
+    )
+    _publish(event)
+    return {
+        "message": "Buy Now accepted — matching at lowest ask",
+        "event_id": event.event_id,
+        "status": "pending_execution"
+    }
+
+
+@app.post("/sell-now", status_code=202)
+def sell_now(req: InstantOrderRequest):
+    """
+    Sell Now — instantly sell at the current highest bid price.
+    The matcher will pop the best bid from the order book and execute.
+    If no bids exist, the matcher drops the event (no match possible).
+    """
+    event = MarketEvent.new_sell_now(
+        product_id=req.product_id,
+        user_id=req.user_id
+    )
+    _publish(event)
+    return {
+        "message": "Sell Now accepted — matching at highest bid",
+        "event_id": event.event_id,
+        "status": "pending_execution"
     }
 
 

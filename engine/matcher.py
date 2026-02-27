@@ -48,15 +48,60 @@ def handle_event(event: MarketEvent):
     product = event.product_id
 
     if event.event_type == "bid":
-        # negate price so Python's min-heap behaves as max-heap
         heapq.heappush(bids[product], (-event.price, event))
         print(f"📥 BID  ${event.price:>8.2f}  {event.product_id}  [{event.user_id}]")
+        check_for_match(product)
 
     elif event.event_type == "ask":
         heapq.heappush(asks[product], (event.price, event))
         print(f"📤 ASK  ${event.price:>8.2f}  {event.product_id}  [{event.user_id}]")
+        check_for_match(product)
 
-    check_for_match(product)
+    elif event.event_type == "buy_now":
+        handle_buy_now(event)
+
+    elif event.event_type == "sell_now":
+        handle_sell_now(event)
+
+
+def handle_buy_now(event: MarketEvent):
+    """Buy Now: buyer accepts the current lowest ask price and executes immediately."""
+    product = event.product_id
+
+    if not asks[product]:
+        print(f"⚠️  BUY NOW failed — no asks available for {product}  [{event.user_id}]")
+        return
+
+    ask_price, ask_event = heapq.heappop(asks[product])
+    event.price = ask_price
+
+    order = MatchedOrder.from_match(bid=event, ask=ask_event)
+    print(f"\n⚡ BUY NOW! {order.product_id} @ ${order.price:.2f}")
+    print(f"   buyer:  {order.buyer_id}")
+    print(f"   seller: {order.seller_id}")
+    print(f"   order:  {order.order_id}\n")
+
+    publish_match(order)
+
+
+def handle_sell_now(event: MarketEvent):
+    """Sell Now: seller accepts the current highest bid price and executes immediately."""
+    product = event.product_id
+
+    if not bids[product]:
+        print(f"⚠️  SELL NOW failed — no bids available for {product}  [{event.user_id}]")
+        return
+
+    neg_bid_price, bid_event = heapq.heappop(bids[product])
+    event.price = -neg_bid_price
+
+    order = MatchedOrder.from_match(bid=bid_event, ask=event)
+    print(f"\n⚡ SELL NOW! {order.product_id} @ ${order.price:.2f}")
+    print(f"   buyer:  {order.buyer_id}")
+    print(f"   seller: {order.seller_id}")
+    print(f"   order:  {order.order_id}\n")
+
+    publish_match(order)
 
 
 def check_for_match(product_id: str):

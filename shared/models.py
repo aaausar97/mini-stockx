@@ -13,7 +13,7 @@ class MarketEvent:
     go to the same partition — guaranteeing order.
     """
     event_id: str
-    event_type: Literal["bid", "ask"]
+    event_type: Literal["bid", "ask", "buy_now", "sell_now"]
     product_id: str       # e.g. "jordan-1-chicago-10"
     user_id: str
     price: float
@@ -38,6 +38,31 @@ class MarketEvent:
             product_id=product_id,
             user_id=user_id,
             price=price,
+            timestamp=time.time()
+        )
+
+    @classmethod
+    def new_buy_now(cls, product_id: str, user_id: str):
+        """Buyer accepts the current lowest ask — price is 0 as a sentinel,
+        the matcher fills in the real price from the order book."""
+        return cls(
+            event_id=str(uuid.uuid4()),
+            event_type="buy_now",
+            product_id=product_id,
+            user_id=user_id,
+            price=0.0,
+            timestamp=time.time()
+        )
+
+    @classmethod
+    def new_sell_now(cls, product_id: str, user_id: str):
+        """Seller accepts the current highest bid"""
+        return cls(
+            event_id=str(uuid.uuid4()),
+            event_type="sell_now",
+            product_id=product_id,
+            user_id=user_id,
+            price=0.0,
             timestamp=time.time()
         )
 
