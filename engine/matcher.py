@@ -48,6 +48,7 @@ def handle_event(event: MarketEvent):
     product = event.product_id
 
     if event.event_type == "bid":
+        # negate price so Python's min-heap behaves as max-heap
         heapq.heappush(bids[product], (-event.price, event))
         print(f"📥 BID  ${event.price:>8.2f}  {event.product_id}  [{event.user_id}]")
         check_for_match(product)
