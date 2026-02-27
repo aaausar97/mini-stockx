@@ -112,6 +112,16 @@ curl -X POST http://localhost:8000/ask \
 curl -X POST http://localhost:8000/bid \
   -H "Content-Type: application/json" \
   -d '{"product_id": "jordan-1-chicago-10", "user_id": "buyer_002", "price": 215}'
+
+# Place ask at $220
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"product_id": "jordan-1-chicago-10", "user_id": "seller_002", "price": 220}'
+
+# Buy now
+curl -X POST http://localhost:8000/buy-now \
+  -H "Content-Type: application/json" \
+  -d '{"product_id": "jordan-1-chicago-10", "user_id": "buyer_001"}' 
 ```
 
 Watch your docker-compose logs — you should see:
@@ -137,9 +147,7 @@ All three triggered by one event. That's SNS fanout working.
 
 ---
 
-## Interview Talking Points
-
-- "I partitioned Kafka by product_id so all events for one product are ordered and processed sequentially — eliminating concurrent match conflicts without needing distributed locks"
-- "SNS fans the match event to separate SQS queues so payment and notification services are fully decoupled — either can fail without affecting the other"
-- "Messages not deleted from SQS on failure means automatic retry — the visibility timeout brings them back"
-- "In production I'd move the order book heaps from in-memory to Redis so the matcher can scale horizontally"
+- I partitioned Kafka by product_id so all events for one product are ordered and processed sequentially — eliminating concurrent match conflicts without needing distributed locks
+- SNS fans the match event to separate SQS queues so payment and notification services are fully decoupled — either can fail without affecting the other
+- Messages not deleted from SQS on failure means automatic retry — the visibility timeout brings them back
+- In production I'd move the order book heaps from in-memory to Redis so the matcher can scale horizontally
