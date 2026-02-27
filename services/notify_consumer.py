@@ -1,12 +1,10 @@
 """
-Notification Service — mini-stockx
+Notification Service
 
 Polls its OWN SQS queue (separate from payment service).
 Both payment and notification get the same match event via SNS fanout —
 but each processes it independently, at their own pace.
 
-This is the exact pattern you built for your social app,
-just with SQS in front instead of direct Lambda invocation.
 """
 
 import json
@@ -49,6 +47,7 @@ def run():
                 body = json.loads(msg["Body"])
                 order = json.loads(body.get("Message", msg["Body"]))
 
+                # firebase/push notification integration here
                 process_notification(order)
 
                 sqs.delete_message(

@@ -1,5 +1,5 @@
 """
-Payment Service — mini-stockx
+Payment Service
 
 Polls its own SQS queue for matched orders.
 In production this would charge the buyer via Stripe/payment processor.
