@@ -39,6 +39,22 @@ api/matcher (docker-compose) → AWS MSK (public SASL/SCRAM) → matcher → SNS
 
 **Not committed** (see root `.gitignore`): `.terraform/`, `*.tfstate`, `terraform.tfvars`.
 
+## How the Terraform files fit together
+
+All `.tf` files are one module — filenames are just organization.
+
+```
+terraform.tfvars → variables.tf → main.tf / msk.tf → outputs.tf → write-env.sh → ../.env
+                      ↑
+                 versions.tf (providers)
+```
+
+**`main.tf`** (always on): SNS topic → two SQS queues → queue policies (allow SNS to write) → subscriptions.
+
+**`msk.tf`** (only if `enable_msk = true`): VPC/subnets lookup → KMS + SCRAM secret → security group + MSK config → cluster → secret association → bootstrap brokers output. Independent of `main.tf` — shares only `project_name` and `aws_region`.
+
+**`outputs.tf`** exports resource ARNs/URLs (and Kafka creds when MSK is on). `write-env.sh` reads these into `.env`.
+
 ## Prerequisites
 
 1. **Terraform** ≥ 1.5
