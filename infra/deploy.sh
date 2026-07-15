@@ -17,6 +17,10 @@ fi
 echo "→ terraform init"
 terraform init -input=false
 
+if grep -Eq '^[[:space:]]*enable_msk[[:space:]]*=[[:space:]]*true' terraform.tfvars 2>/dev/null; then
+  echo "→ MSK enabled — first apply can take ~20 minutes"
+fi
+
 echo "→ terraform apply"
 terraform apply -auto-approve -input=false
 
@@ -34,4 +38,8 @@ if grep -q 'your_key_here' ../.env 2>/dev/null; then
 else
   echo "Next:"
 fi
-echo "  cd .. && docker-compose up --build"
+if grep -Eq '^[[:space:]]*enable_msk[[:space:]]*=[[:space:]]*true' terraform.tfvars 2>/dev/null; then
+  echo "  cd .. && docker-compose up --build api matcher payment-service notification-service"
+else
+  echo "  cd .. && docker-compose up --build"
+fi

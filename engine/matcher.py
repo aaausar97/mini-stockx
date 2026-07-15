@@ -21,6 +21,7 @@ import boto3
 from confluent_kafka import Consumer, KafkaError
 
 from shared.models import MarketEvent, MatchedOrder
+from shared.kafka_config import kafka_client_config
 
 
 # ── AWS SNS setup ─────────────────────────────────────────────────────────────
@@ -161,12 +162,11 @@ def publish_match(order: MatchedOrder):
 # ── Kafka Consumer ────────────────────────────────────────────────────────────
 
 def run():
-    consumer = Consumer({
-        "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
-        "group.id": "matching-engine",        # consumer group
-        "auto.offset.reset": "earliest",      # on first start, read from beginning
+    consumer = Consumer(kafka_client_config(**{
+        "group.id": "matching-engine",
+        "auto.offset.reset": "earliest",
         "enable.auto.commit": True,
-    })
+    }))
 
     consumer.subscribe(["marketplace.events"])
     print("🔄 Matching engine running — waiting for events...")

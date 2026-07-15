@@ -1,25 +1,26 @@
-# Infrastructure — SNS + SQS fanout
+# Infrastructure — SNS + SQS fanout (+ optional MSK)
 
-Terraform for the AWS resources the app needs after a match:
+Terraform for the AWS resources the app needs:
 
 - SNS topic `stockx-order-matched`
 - SQS queues `stockx-payment` and `stockx-notify`
-- SNS subscriptions + queue policies so SNS can publish to both queues
+- SNS subscriptions + queue policies
+- **Optional:** Amazon MSK with SASL/SCRAM, public access, and auto topic creation
 
-Kafka and the app containers stay local (`docker-compose`). Only the match-event fanout runs in AWS.
+Kafka defaults to local docker-compose. Set `enable_msk = true` to run Kafka in AWS instead.
 
 ## Architecture
 
+### Default (local Kafka)
+
 ```
-matcher (local)
-      |
-  SNS topic: stockx-order-matched
-      |          |
-  SQS queue   SQS queue
-  payment     notify
-      |          |
-  payment-   notification-
-  service    service (local docker-compose)
+api/matcher (docker-compose) → local Kafka → matcher → SNS → SQS → services
+```
+
+### With MSK (`enable_msk = true`)
+
+```
+api/matcher (docker-compose) → AWS MSK (public SASL/SCRAM) → matcher → SNS → SQS → services
 ```
 
 ## Files
@@ -28,10 +29,11 @@ matcher (local)
 | --- | --- |
 | `deploy.sh` | One command: init, apply, refresh `.env` |
 | `write-env.sh` | Writes `../.env` from terraform outputs |
-| `versions.tf` | Terraform + AWS provider pins |
-| `variables.tf` | `aws_region`, `project_name` |
 | `main.tf` | SNS topic, SQS queues, subscriptions, policies |
-| `outputs.tf` | ARNs/URLs for `.env` |
+| `msk.tf` | Optional MSK cluster, SCRAM secret, public access |
+| `versions.tf` | Terraform + provider pins |
+| `variables.tf` | Region, project name, MSK toggles |
+| `outputs.tf` | ARNs/URLs and Kafka connection values |
 | `terraform.tfvars.example` | Example overrides (copy to `terraform.tfvars`) |
 | `.terraform.lock.hcl` | Provider lockfile — commit this |
 
@@ -40,68 +42,99 @@ matcher (local)
 ## Prerequisites
 
 1. **Terraform** ≥ 1.5
-   ```bash
-   brew tap hashicorp/tap && brew install hashicorp/tap/terraform
-   ```
-
-2. **AWS CLI** with credentials configured
-   ```bash
-   aws configure
-   aws sts get-caller-identity
-   ```
-
-3. **IAM permissions** — needs SNS and SQS create/read/update/delete in your account.
+2. **AWS CLI** configured (`aws sts get-caller-identity`)
+3. **IAM permissions** for SNS, SQS, and (if MSK) Kafka, Secrets Manager, KMS, EC2/VPC
 
 ## Deploy (new or update)
-
-From the repo root:
 
 ```bash
 ./infra/deploy.sh
 ```
 
-Or from this directory:
+What it does:
+
+1. Verifies `terraform` and `aws`
+2. Seeds `terraform.tfvars` on first run
+3. `terraform init` + `terraform apply -auto-approve`
+4. Runs `write-env.sh` → `../.env`
+
+Re-run after any Terraform change.
+
+## Local Kafka (default)
+
+```bash
+./infra/deploy.sh
+docker-compose up --build
+```
+
+Uses the `kafka` container in docker-compose. No MSK cost.
+
+## AWS MSK (Terraform, no console)
+
+**Cost:** ~$70/month for 2× `kafka.t3.small`. No free tier. Set `enable_msk = false` (or destroy) when done.
+
+### 1. Enable MSK in tfvars
+
+```bash
+cd infra
+cp terraform.tfvars.example terraform.tfvars
+```
+
+Edit `terraform.tfvars`:
+
+```hcl
+enable_msk = true
+```
+
+### 2. Deploy
 
 ```bash
 ./deploy.sh
 ```
 
-What it does:
+First apply takes **~20 minutes**. Terraform creates:
 
-1. Verifies `terraform` and `aws` are installed
-2. Verifies AWS credentials (`aws sts get-caller-identity`)
-3. Copies `terraform.tfvars.example` → `terraform.tfvars` on first run
-4. `terraform init` + `terraform apply -auto-approve`
-5. Runs `write-env.sh` to write/update `../.env`
+| Resource | What |
+| --- | --- |
+| `aws_msk_cluster` | 2 brokers, `kafka.t3.small`, default VPC |
+| `aws_msk_configuration` | `auto.create.topics.enable=true` (no manual topic step) |
+| `aws_kms_key` + `aws_secretsmanager_secret` | SCRAM creds (`AmazonMSK_<project>`) |
+| `aws_msk_scram_secret_association` | Wires secret to cluster |
+| Public access | `SERVICE_PROVIDED_EIPS` — reachable from your laptop |
+| Security group | Port 9196 open for SASL/SCRAM clients |
 
-Re-run `./deploy.sh` any time you change Terraform or need to refresh outputs into `.env`.
+`write-env.sh` adds `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_USERNAME`, and `KAFKA_PASSWORD` to `.env`.
 
-## First-time app setup
+### 3. Run app without local Kafka
 
 ```bash
-./infra/deploy.sh
+cd ..
+docker-compose up --build api matcher payment-service notification-service
+```
 
-# if deploy printed a creds reminder, edit .env:
-#   AWS_ACCESS_KEY_ID
-#   AWS_SECRET_ACCESS_KEY
+Omit the `kafka` service — app containers connect to MSK via `.env`.
 
-docker-compose up --build
+The app auto-enables SASL/SCRAM when `KAFKA_USERNAME` and `KAFKA_PASSWORD` are set (`shared/kafka_config.py`).
+
+### If bootstrap string is empty
+
+Public bootstrap brokers can lag cluster creation. Wait a few minutes, then:
+
+```bash
+cd infra && terraform apply && ./write-env.sh
 ```
 
 ## Variables
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `aws_region` | `us-east-1` | Region for SNS/SQS |
-| `project_name` | `stockx` | Resource name prefix (`stockx-order-matched`, etc.) |
-
-Override via `terraform.tfvars`:
-
-```bash
-cp terraform.tfvars.example terraform.tfvars
-# edit terraform.tfvars
-./deploy.sh
-```
+| `aws_region` | `us-east-1` | Region for all resources |
+| `project_name` | `stockx` | Resource name prefix |
+| `enable_msk` | `false` | Provision MSK instead of local Kafka |
+| `kafka_version` | `3.6.0` | MSK Kafka version |
+| `kafka_username` | `stockx` | SCRAM username |
+| `msk_broker_count` | `2` | Broker nodes |
+| `msk_instance_type` | `kafka.t3.small` | Broker instance type |
 
 ## Outputs
 
@@ -110,102 +143,9 @@ cp terraform.tfvars.example terraform.tfvars
 | `sns_topic_arn` | `SNS_TOPIC_ARN` |
 | `sqs_payment_url` | `SQS_PAYMENT_URL` |
 | `sqs_notify_url` | `SQS_NOTIFY_URL` |
-| `aws_region` | `AWS_DEFAULT_REGION` |
-
-Manual copy:
-
-```bash
-terraform output sns_topic_arn
-terraform output sqs_payment_url
-terraform output sqs_notify_url
-```
-
-## Using AWS MSK instead of local Kafka
-
-By default Kafka runs locally in docker-compose. You can swap it for Amazon MSK
-(Managed Streaming for Kafka) so the broker lives in AWS too.
-
-**Cost warning:** local Kafka is free; MSK is not. The smallest provisioned
-cluster (2× `kafka.t3.small`) runs ~$70/month plus storage. There's no
-free tier. Tear it down when you're not using it.
-
-**Why provisioned and not MSK Serverless:** Serverless only allows IAM auth and
-is only reachable from inside its VPC — your laptop's docker containers can't
-connect. Provisioned MSK supports **public access with SASL/SCRAM**, which works
-from anywhere with a username/password.
-
-### 1. Create the cluster
-
-AWS Console → MSK → Create cluster:
-
-- Type: **Provisioned**, 2 brokers, `kafka.t3.small`, default VPC
-- Access control: enable **SASL/SCRAM**, disable unauthenticated access
-- Wait for it to reach Active (~20 min)
-
-### 2. Create the SCRAM credentials
-
-- Secrets Manager → Create secret → type "Other"
-- Value: `{"username": "stockx", "password": "<strong password>"}`
-- Name must start with `AmazonMSK_` (e.g. `AmazonMSK_stockx`)
-- Must be encrypted with a **customer-managed KMS key** (default AWS key won't work)
-- MSK → your cluster → Properties → Associate the secret
-
-### 3. Enable public access
-
-Only possible after the cluster is Active:
-
-- MSK → cluster → Properties → Networking → Edit public access → Turn on
-
-### 4. Get the bootstrap string
-
-```bash
-aws kafka get-bootstrap-brokers --cluster-arn <CLUSTER_ARN> \
-  --query 'BootstrapBrokerStringPublicSaslScram' --output text
-```
-
-### 5. Create the topic
-
-MSK doesn't auto-create topics by default. Create it once (any machine with
-Kafka CLI tools and the SCRAM creds), or add a cluster configuration with
-`auto.create.topics.enable=true`:
-
-```bash
-kafka-topics.sh --create --topic marketplace.events \
-  --bootstrap-server <PUBLIC_BOOTSTRAP> \
-  --command-config client.properties   # SASL_SSL + SCRAM creds
-```
-
-### 6. Point the app at MSK
-
-The producer/consumer configs in `api/main.py` and `engine/matcher.py` currently
-only set `bootstrap.servers`. SASL/SCRAM needs three more fields:
-
-```python
-{
-    "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
-    "security.protocol": "SASL_SSL",
-    "sasl.mechanisms": "SCRAM-SHA-512",
-    "sasl.username": os.getenv("KAFKA_USERNAME"),
-    "sasl.password": os.getenv("KAFKA_PASSWORD"),
-}
-```
-
-Then in `.env`:
-
-```bash
-KAFKA_BOOTSTRAP_SERVERS=<public bootstrap string from step 4>
-KAFKA_USERNAME=stockx
-KAFKA_PASSWORD=<password from step 2>
-```
-
-And in `docker-compose.yml`: delete the `kafka` service, every
-`depends_on: kafka` block, and the `KAFKA_BOOTSTRAP_SERVERS: kafka:29092`
-overrides so the value comes from `.env`.
-
-### Teardown
-
-MSK → Delete cluster (billing stops), then delete the `AmazonMSK_stockx` secret
-and the KMS key.
+| `kafka_bootstrap_servers` | `KAFKA_BOOTSTRAP_SERVERS` (MSK only) |
+| `kafka_username` | `KAFKA_USERNAME` (MSK only) |
+| `kafka_password` | `KAFKA_PASSWORD` (MSK only, sensitive) |
 
 ## Teardown
 
@@ -214,8 +154,10 @@ cd infra
 terraform destroy
 ```
 
+Destroys SNS/SQS and MSK (if enabled), SCRAM secret, and KMS key.
+
 ## Not included
 
 - Remote Terraform state (S3 backend + lock table)
 - IAM user/role creation (use your existing AWS credentials)
-- Terraform for MSK (documented above as manual steps — add if you settle on MSK long-term)
+- Running api/matcher in AWS (still local docker-compose)

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from confluent_kafka import Producer
 
 from shared.models import MarketEvent
+from shared.kafka_config import kafka_client_config
 
 
 # ── Kafka Producer setup ──────────────────────────────────────────────────────
@@ -24,10 +25,7 @@ from shared.models import MarketEvent
 producer: Producer = None
 
 def get_producer() -> Producer:
-    return Producer({
-        "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
-        "client.id": "stockx-api",
-    })
+    return Producer(kafka_client_config(client_id="stockx-api"))
 
 def delivery_report(err, msg):
     """Called by Kafka after each message is delivered (or fails)."""

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ponytail: one script beats copy-pasting three terraform outputs
+# ponytail: one script beats copy-pasting terraform outputs
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -8,10 +8,25 @@ REGION=$(terraform output -raw aws_region)
 SNS=$(terraform output -raw sns_topic_arn)
 PAYMENT=$(terraform output -raw sqs_payment_url)
 NOTIFY=$(terraform output -raw sqs_notify_url)
+MSK_ENABLED=$(terraform output -raw msk_enabled)
 
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source <(grep -E '^(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)=' "$ENV_FILE" 2>/dev/null || true)
+fi
+
+KAFKA_BLOCK=""
+if [[ "$MSK_ENABLED" == "true" ]]; then
+  KAFKA_BOOTSTRAP=$(terraform output -raw kafka_bootstrap_servers)
+  KAFKA_USER=$(terraform output -raw kafka_username)
+  KAFKA_PASS=$(terraform output -raw kafka_password)
+  KAFKA_BLOCK=$(cat <<EOF
+
+KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP}
+KAFKA_USERNAME=${KAFKA_USER}
+KAFKA_PASSWORD=${KAFKA_PASS}
+EOF
+)
 fi
 
 cat >"$ENV_FILE" <<EOF
@@ -23,7 +38,7 @@ AWS_DEFAULT_REGION=${REGION}
 
 SNS_TOPIC_ARN=${SNS}
 SQS_PAYMENT_URL=${PAYMENT}
-SQS_NOTIFY_URL=${NOTIFY}
+SQS_NOTIFY_URL=${NOTIFY}${KAFKA_BLOCK}
 EOF
 
 echo "Wrote ${ENV_FILE}"

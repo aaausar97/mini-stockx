@@ -5,3 +5,10 @@
 
 aws_region   = "us-east-1"
 project_name = "stockx"
+
+# Set true to provision MSK (~$70/mo, first apply takes ~20 min)
+# enable_msk         = true
+# kafka_version      = "3.6.0"
+# kafka_username     = "stockx"
+# msk_broker_count   = 2
+# msk_instance_type  = "kafka.t3.small"
