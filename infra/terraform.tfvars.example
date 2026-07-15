@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars and adjust if needed.
+# terraform.tfvars is gitignored — never commit account-specific overrides.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+
+aws_region   = "us-east-1"
+project_name = "stockx"
