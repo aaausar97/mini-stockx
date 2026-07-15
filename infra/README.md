@@ -120,6 +120,93 @@ terraform output sqs_payment_url
 terraform output sqs_notify_url
 ```
 
+## Using AWS MSK instead of local Kafka
+
+By default Kafka runs locally in docker-compose. You can swap it for Amazon MSK
+(Managed Streaming for Kafka) so the broker lives in AWS too.
+
+**Cost warning:** local Kafka is free; MSK is not. The smallest provisioned
+cluster (2× `kafka.t3.small`) runs ~$70/month plus storage. There's no
+free tier. Tear it down when you're not using it.
+
+**Why provisioned and not MSK Serverless:** Serverless only allows IAM auth and
+is only reachable from inside its VPC — your laptop's docker containers can't
+connect. Provisioned MSK supports **public access with SASL/SCRAM**, which works
+from anywhere with a username/password.
+
+### 1. Create the cluster
+
+AWS Console → MSK → Create cluster:
+
+- Type: **Provisioned**, 2 brokers, `kafka.t3.small`, default VPC
+- Access control: enable **SASL/SCRAM**, disable unauthenticated access
+- Wait for it to reach Active (~20 min)
+
+### 2. Create the SCRAM credentials
+
+- Secrets Manager → Create secret → type "Other"
+- Value: `{"username": "stockx", "password": "<strong password>"}`
+- Name must start with `AmazonMSK_` (e.g. `AmazonMSK_stockx`)
+- Must be encrypted with a **customer-managed KMS key** (default AWS key won't work)
+- MSK → your cluster → Properties → Associate the secret
+
+### 3. Enable public access
+
+Only possible after the cluster is Active:
+
+- MSK → cluster → Properties → Networking → Edit public access → Turn on
+
+### 4. Get the bootstrap string
+
+```bash
+aws kafka get-bootstrap-brokers --cluster-arn <CLUSTER_ARN> \
+  --query 'BootstrapBrokerStringPublicSaslScram' --output text
+```
+
+### 5. Create the topic
+
+MSK doesn't auto-create topics by default. Create it once (any machine with
+Kafka CLI tools and the SCRAM creds), or add a cluster configuration with
+`auto.create.topics.enable=true`:
+
+```bash
+kafka-topics.sh --create --topic marketplace.events \
+  --bootstrap-server <PUBLIC_BOOTSTRAP> \
+  --command-config client.properties   # SASL_SSL + SCRAM creds
+```
+
+### 6. Point the app at MSK
+
+The producer/consumer configs in `api/main.py` and `engine/matcher.py` currently
+only set `bootstrap.servers`. SASL/SCRAM needs three more fields:
+
+```python
+{
+    "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
+    "security.protocol": "SASL_SSL",
+    "sasl.mechanisms": "SCRAM-SHA-512",
+    "sasl.username": os.getenv("KAFKA_USERNAME"),
+    "sasl.password": os.getenv("KAFKA_PASSWORD"),
+}
+```
+
+Then in `.env`:
+
+```bash
+KAFKA_BOOTSTRAP_SERVERS=<public bootstrap string from step 4>
+KAFKA_USERNAME=stockx
+KAFKA_PASSWORD=<password from step 2>
+```
+
+And in `docker-compose.yml`: delete the `kafka` service, every
+`depends_on: kafka` block, and the `KAFKA_BOOTSTRAP_SERVERS: kafka:29092`
+overrides so the value comes from `.env`.
+
+### Teardown
+
+MSK → Delete cluster (billing stops), then delete the `AmazonMSK_stockx` secret
+and the KMS key.
+
 ## Teardown
 
 ```bash
@@ -131,4 +218,4 @@ terraform destroy
 
 - Remote Terraform state (S3 backend + lock table)
 - IAM user/role creation (use your existing AWS credentials)
-- Kafka or app services in AWS
+- Terraform for MSK (documented above as manual steps — add if you settle on MSK long-term)
