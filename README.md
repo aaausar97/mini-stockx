@@ -27,62 +27,38 @@ POST /bid or /ask
 
 ---
 
-## AWS Setup (Do This First)
-
-You need to create 3 resources in AWS before running the project.
-
-### 1. Create SNS Topic
-- Go to AWS Console → SNS → Topics → Create topic
-- Type: **Standard**
-- Name: `stockx-order-matched`
-- Copy the ARN → paste into `.env` as `SNS_TOPIC_ARN`
-
-### 2. Create SQS Queue for Payment Service
-- Go to AWS Console → SQS → Create queue
-- Type: **Standard**
-- Name: `stockx-payment`
-- Copy the URL → paste into `.env` as `SQS_PAYMENT_URL`
-
-### 3. Create SQS Queue for Notification Service
-- Same as above but name it `stockx-notify`
-- Copy URL → paste into `.env` as `SQS_NOTIFY_URL`
-
-### 4. Subscribe both SQS queues to the SNS topic
-- Go to your SNS topic → Subscriptions → Create subscription
-- Protocol: **SQS**
-- Endpoint: paste the ARN of `stockx-payment` queue
-- Repeat for `stockx-notify` queue
-
-### 5. Allow SNS to write to your SQS queues
-- Go to each SQS queue → Access policy → Edit
-- Add this statement (replace YOUR values):
-
-```json
-{
-  "Effect": "Allow",
-  "Principal": { "Service": "sns.amazonaws.com" },
-  "Action": "sqs:SendMessage",
-  "Resource": "YOUR_SQS_QUEUE_ARN",
-  "Condition": {
-    "ArnEquals": { "aws:SourceArn": "YOUR_SNS_TOPIC_ARN" }
-  }
-}
-```
-
----
-
-## Local Setup
+## Quick Start
 
 ```bash
-# 1. Clone and enter the project
+git clone https://github.com/aaausar97/mini-stockx.git
 cd mini-stockx
 
-# 2. Copy env file and fill in your AWS values
-cp .env.example .env
+# 1. Provision AWS (SNS + SQS) and write .env
+./infra/deploy.sh
+
+# 2. Add AWS credentials to .env if deploy.sh flagged placeholders
+#    AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
 
 # 3. Start everything
 docker-compose up --build
 ```
+
+Re-run `./infra/deploy.sh` after any Terraform changes — it applies updates and refreshes `.env`.
+
+Terraform details: [`infra/README.md`](infra/README.md)
+
+<details>
+<summary>Manual AWS setup (console)</summary>
+
+1. **SNS topic** — Standard, name `stockx-order-matched` → `SNS_TOPIC_ARN`
+2. **SQS queue** — Standard, name `stockx-payment` → `SQS_PAYMENT_URL`
+3. **SQS queue** — Standard, name `stockx-notify` → `SQS_NOTIFY_URL`
+4. Subscribe both queues to the SNS topic (protocol: SQS)
+5. On each queue, allow `sns.amazonaws.com` to `sqs:SendMessage` with `aws:SourceArn` = your topic ARN
+
+Copy values into `.env` (see `.env.example`).
+
+</details>
 
 You should see 4 containers start:
 - `kafka` — message broker (KRaft mode, no ZooKeeper needed)
